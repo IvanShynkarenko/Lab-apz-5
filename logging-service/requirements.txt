@@ -1,0 +1,5 @@
+grpcio>=1.78.0
+protobuf>=6.31.0
+hazelcast-python-client>=5.4.0
+httpx>=0.27.0
+python-consul>=1.1.0

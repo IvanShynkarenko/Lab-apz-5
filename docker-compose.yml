@@ -1,0 +1,167 @@
+services:
+
+  # ── Consul (Service Registry + KV Config) ───────────────────────────────────
+  consul:
+    image: hashicorp/consul:1.18
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -bind=0.0.0.0
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+
+  # ── Consul KV bootstrap (seeds config values once) ──────────────────────────
+  consul-bootstrap:
+    image: curlimages/curl:8.7.1
+    volumes:
+      - ./consul-bootstrap/bootstrap.sh:/bootstrap.sh
+    command: sh /bootstrap.sh
+    depends_on:
+      - consul
+    restart: on-failure
+
+  # ── Hazelcast cluster (3 nodes) ──────────────────────────────────────────────
+  hazelcast-1:
+    image: hazelcast/hazelcast:5.3
+    volumes:
+      - ./hazelcast/hazelcast.yaml:/opt/hazelcast/config/hazelcast-docker.yaml
+    command: ["hz", "start", "-c", "/opt/hazelcast/config/hazelcast-docker.yaml"]
+    ports:
+      - "5701:5701"
+
+  hazelcast-2:
+    image: hazelcast/hazelcast:5.3
+    volumes:
+      - ./hazelcast/hazelcast.yaml:/opt/hazelcast/config/hazelcast-docker.yaml
+    command: ["hz", "start", "-c", "/opt/hazelcast/config/hazelcast-docker.yaml"]
+    ports:
+      - "5702:5701"
+
+  hazelcast-3:
+    image: hazelcast/hazelcast:5.3
+    volumes:
+      - ./hazelcast/hazelcast.yaml:/opt/hazelcast/config/hazelcast-docker.yaml
+    command: ["hz", "start", "-c", "/opt/hazelcast/config/hazelcast-docker.yaml"]
+    ports:
+      - "5703:5701"
+
+  # ── PostgreSQL for counter-service ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: counterdb
+      POSTGRES_USER: counter
+      POSTGRES_PASSWORD: counter
+    ports:
+      - "5435:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # ── logging-service (3 instances) ───────────────────────────────────────────
+  logging-service-1:
+    build:
+      context: .
+      dockerfile: logging-service/Dockerfile
+    environment:
+      PYTHONUNBUFFERED: "1"
+      SERVICE_ID: logging-1
+      LOG_PORT: "50051"
+      MY_HOST: "logging-service-1"
+      CONSUL_HOST: "consul"
+      CONSUL_PORT: "8500"
+    ports:
+      - "50051:50051"
+    depends_on:
+      - consul
+      - consul-bootstrap
+      - hazelcast-1
+      - hazelcast-2
+      - hazelcast-3
+
+  logging-service-2:
+    build:
+      context: .
+      dockerfile: logging-service/Dockerfile
+    environment:
+      PYTHONUNBUFFERED: "1"
+      SERVICE_ID: logging-2
+      LOG_PORT: "50051"
+      MY_HOST: "logging-service-2"
+      CONSUL_HOST: "consul"
+      CONSUL_PORT: "8500"
+    ports:
+      - "50054:50051"
+    depends_on:
+      - consul
+      - consul-bootstrap
+      - hazelcast-1
+      - hazelcast-2
+      - hazelcast-3
+
+  logging-service-3:
+    build:
+      context: .
+      dockerfile: logging-service/Dockerfile
+    environment:
+      PYTHONUNBUFFERED: "1"
+      SERVICE_ID: logging-3
+      LOG_PORT: "50051"
+      MY_HOST: "logging-service-3"
+      CONSUL_HOST: "consul"
+      CONSUL_PORT: "8500"
+    ports:
+      - "50055:50051"
+    depends_on:
+      - consul
+      - consul-bootstrap
+      - hazelcast-1
+      - hazelcast-2
+      - hazelcast-3
+
+  # ── counter-service ──────────────────────────────────────────────────────────
+  counter-service:
+    build:
+      context: .
+      dockerfile: messages-service/Dockerfile
+    environment:
+      PYTHONUNBUFFERED: "1"
+      COUNTER_PORT: "50060"
+      MY_HOST: "counter-service"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: counterdb
+      DB_USER: counter
+      DB_PASS: counter
+      CONSUL_HOST: "consul"
+      CONSUL_PORT: "8500"
+    ports:
+      - "50060:50060"
+    depends_on:
+      - postgres
+      - consul
+      - consul-bootstrap
+      - hazelcast-1
+      - hazelcast-2
+      - hazelcast-3
+
+  # ── facade-service ───────────────────────────────────────────────────────────
+  facade-service:
+    build:
+      context: .
+      dockerfile: facade-service/Dockerfile
+    environment:
+      PYTHONUNBUFFERED: "1"
+      FACADE_PORT: "50050"
+      MY_HOST: "facade-service"
+      CONSUL_HOST: "consul"
+      CONSUL_PORT: "8500"
+    ports:
+      - "50050:50050"
+    depends_on:
+      - consul
+      - consul-bootstrap
+      - logging-service-1
+      - logging-service-2
+      - logging-service-3
+      - counter-service
+
+volumes:
+  pgdata:
